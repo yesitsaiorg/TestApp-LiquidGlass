@@ -39,9 +39,10 @@ class LiquidGlassNativeView: RCTView {
         glassEffect.isInteractive = interactive
         
         let newEffectView = UIVisualEffectView(effect: glassEffect)
-        newEffectView.frame = self.bounds
-        newEffectView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        // DON'T set frame here — bounds may be .zero before Yoga layout.
+        // layoutSubviews() will set the correct frame after RN computes layout.
         newEffectView.clipsToBounds = true
+        newEffectView.layer.masksToBounds = true
         newEffectView.isUserInteractionEnabled = false
         
         if let tint = glassTintColor {
@@ -51,6 +52,9 @@ class LiquidGlassNativeView: RCTView {
         // Insert effect view at the very back — behind all React Native children
         self.insertSubview(newEffectView, at: 0)
         self.effectView = newEffectView
+        
+        // Trigger layout to set the correct frame once RN is ready
+        setNeedsLayout()
     }
     
     // KEY FIX: Do NOT reparent children into contentView.
@@ -71,8 +75,13 @@ class LiquidGlassNativeView: RCTView {
     
     override func layoutSubviews() {
         super.layoutSubviews()
-        effectView?.frame = bounds
-        effectView?.layer.cornerRadius = layer.cornerRadius
+        // CRITICAL: This is the ONLY place we set effectView's frame.
+        // React Native's Yoga layout has computed bounds by this point.
+        if let effectView = effectView {
+            effectView.frame = bounds
+            effectView.layer.cornerRadius = layer.cornerRadius
+            effectView.layer.masksToBounds = true
+        }
     }
 }
 
