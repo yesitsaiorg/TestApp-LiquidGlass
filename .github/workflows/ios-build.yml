@@ -1,0 +1,228 @@
+# =============================================================================
+# GitHub Actions – iOS Build for TestApp (React Native 0.80 + UIGlassEffect)
+# =============================================================================
+# Produces an unsigned IPA artifact on every push to main.
+# No Apple Developer account needed for unsigned builds.
+#
+# REPO STRUCTURE ASSUMPTION:
+#   The repository root is "Marketplace App/Test App/" on disk.
+#   When you push to GitHub, this directory becomes the repo root.
+#
+# REQUIREMENTS:
+#   - Xcode 26+ on the runner (iOS 26 SDK for UIGlassEffect)
+#   - The ios/ directory is auto-generated in CI if not committed
+#
+# FREE TIER LIMITS:
+#   - Public repos  → unlimited macOS minutes
+#   - Private repos → ~2,000 min/month (macOS minutes count 10x)
+# =============================================================================
+
+name: iOS Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:          # allow manual trigger from GitHub UI
+
+jobs:
+  ios-build:
+    runs-on: macos-15        # macOS Sequoia – latest GitHub-hosted runner
+    timeout-minutes: 60
+
+    steps:
+      # ── 1. Checkout ──────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── 2. Select Xcode ─────────────────────────────────────────
+      # UIGlassEffect requires iOS 26 SDK → Xcode 26+
+      - name: Select latest Xcode
+        run: |
+          echo "=== Available Xcode versions ==="
+          ls /Applications/ | grep Xcode || true
+          # Try Xcode 26 first, fall back to latest available
+          if [ -d "/Applications/Xcode_26.0.app" ]; then
+            sudo xcode-select -s /Applications/Xcode_26.0.app/Contents/Developer
+          elif [ -d "/Applications/Xcode_26.app" ]; then
+            sudo xcode-select -s /Applications/Xcode_26.app/Contents/Developer
+          else
+            LATEST_XCODE=$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -1)
+            if [ -n "$LATEST_XCODE" ]; then
+              sudo xcode-select -s "$LATEST_XCODE/Contents/Developer"
+            fi
+          fi
+          echo "=== Selected Xcode ==="
+          xcode-select -p
+          xcodebuild -version
+          echo "=== Available SDKs ==="
+          xcodebuild -showsdks 2>/dev/null | grep -i iphone || true
+
+      # ── 3. Node.js ──────────────────────────────────────────────
+      - name: Setup Node.js 18
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+
+      # ── 4. Install JS dependencies ──────────────────────────────
+      - name: Install npm dependencies
+        run: npm install
+
+      # ── 5. Generate ios/ directory if not present ───────────────
+      # Bare RN 0.80 projects should have ios/ committed, but if
+      # it's missing we regenerate from the RN template.
+      - name: Generate iOS project (if ios/ not committed)
+        run: |
+          if [ -d "ios" ]; then
+            echo "ios/ directory found in repo – skipping generation"
+          else
+            echo "ios/ directory not found – generating from RN template..."
+            npx @react-native-community/cli init TestApp \
+              --version 0.80.0 \
+              --directory /tmp/rn-ios-gen \
+              --skip-install \
+              --skip-git-init
+            cp -r /tmp/rn-ios-gen/ios ./ios
+            echo "✅ ios/ directory generated"
+          fi
+          echo "=== ios/ contents ==="
+          ls -la ios/
+
+      # ── 6. Install Ruby gems (xcodeproj for native module integration)
+      - name: Setup Ruby and xcodeproj gem
+        run: |
+          ruby --version
+          gem install xcodeproj --no-document
+
+      # ── 7. Copy native Swift/ObjC modules into Xcode project ───
+      - name: Copy native module files
+        run: |
+          echo "Copying ios-native/ → ios/TestApp/NativeModules/"
+          mkdir -p ios/TestApp/NativeModules
+          cp ios-native/LiquidGlassViewManager.swift  ios/TestApp/NativeModules/
+          cp ios-native/LiquidGlassViewManager.m      ios/TestApp/NativeModules/
+          cp ios-native/LiquidGlassModule.swift        ios/TestApp/NativeModules/
+          cp ios-native/LiquidGlassModule.m            ios/TestApp/NativeModules/
+          cp ios-native/TestApp-Bridging-Header.h      ios/TestApp/NativeModules/
+          echo "✅ Native module files copied"
+          ls -la ios/TestApp/NativeModules/
+
+      # ── 8. Integrate native modules into Xcode project ─────────
+      - name: Add native modules to Xcode project
+        run: |
+          ruby ci_add_native_modules.rb
+          echo "✅ Xcode project updated with native modules"
+
+      # ── 9. Update iOS deployment target ─────────────────────────
+      - name: Set iOS deployment target to 26.0
+        run: |
+          cd ios
+          # Update project.pbxproj
+          sed -i '' 's/IPHONEOS_DEPLOYMENT_TARGET = [0-9.]*;/IPHONEOS_DEPLOYMENT_TARGET = 26.0;/g' \
+            TestApp.xcodeproj/project.pbxproj
+          # Update Podfile
+          if grep -q "platform :ios" Podfile; then
+            sed -i '' "s/platform :ios, '[0-9.]*'/platform :ios, '26.0'/g" Podfile
+          else
+            echo "platform :ios, '26.0'" | cat - Podfile > /tmp/Podfile.tmp
+            mv /tmp/Podfile.tmp Podfile
+          fi
+          echo "✅ Deployment target set to iOS 26.0"
+
+      # ── 10. CocoaPods install ───────────────────────────────────
+      - name: Pod install
+        run: |
+          cd ios
+          LANG=en_US.UTF-8 pod install --verbose 2>&1 | tail -20
+          echo "✅ CocoaPods installed"
+
+      # ── 11. Patch fmt consteval issue (RN build fix) ────────────
+      - name: Patch fmt consteval → constexpr
+        run: |
+          cd ios
+          FMT_FILES=$(find Pods -name "base.h" -path "*fmt*" 2>/dev/null || true)
+          if [ -n "$FMT_FILES" ]; then
+            echo "$FMT_FILES" | while read -r f; do
+              if grep -q "consteval" "$f" 2>/dev/null; then
+                sed -i '' 's/consteval/constexpr/g' "$f"
+                echo "  Patched: $f"
+              fi
+            done
+            echo "✅ fmt patches applied"
+          else
+            echo "ℹ️  No fmt patch needed"
+          fi
+
+      # ── 12. Bundle React Native JS ─────────────────────────────
+      - name: Bundle JS for Release
+        run: |
+          mkdir -p ios/build
+          npx react-native bundle \
+            --entry-file index.js \
+            --platform ios \
+            --dev false \
+            --bundle-output ios/main.jsbundle \
+            --assets-dest ios/build
+          echo "✅ JS bundle created"
+
+      # ── 13. Build archive (unsigned) ────────────────────────────
+      - name: Build iOS archive
+        run: |
+          cd ios
+          xcodebuild -workspace TestApp.xcworkspace \
+            -scheme TestApp \
+            -sdk iphoneos \
+            -configuration Release \
+            -archivePath ./build/TestApp.xcarchive \
+            archive \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            IPHONEOS_DEPLOYMENT_TARGET=26.0 \
+            | tee /tmp/xcodebuild.log \
+            | grep -E "(BUILD|ARCHIVE|error:|warning:)" | head -40
+
+          # Verify archive was created
+          if [ -d "./build/TestApp.xcarchive" ]; then
+            echo ""
+            echo "✅ ARCHIVE SUCCEEDED"
+            ls -la ./build/TestApp.xcarchive/Products/Applications/ || true
+          else
+            echo ""
+            echo "❌ ARCHIVE FAILED"
+            echo "=== Last 50 lines of build log ==="
+            tail -50 /tmp/xcodebuild.log
+            exit 1
+          fi
+
+      # ── 14. Package IPA ─────────────────────────────────────────
+      - name: Package IPA from archive
+        run: |
+          cd ios
+          rm -rf ./build/ipa
+          mkdir -p ./build/ipa/Payload
+          cp -r ./build/TestApp.xcarchive/Products/Applications/TestApp.app \
+                ./build/ipa/Payload/
+          cd ./build/ipa
+          zip -r ../TestApp.ipa Payload
+          echo ""
+          echo "✅ IPA packaged"
+          ls -lh ../TestApp.ipa
+
+      # ── 15. Upload IPA as artifact ──────────────────────────────
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: TestApp-iOS-IPA
+          path: ios/build/TestApp.ipa
+          retention-days: 30
+
+      # ── 16. Upload build logs (on failure) ──────────────────────
+      - name: Upload build logs (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcodebuild-logs
+          path: /tmp/xcodebuild.log
+          retention-days: 7

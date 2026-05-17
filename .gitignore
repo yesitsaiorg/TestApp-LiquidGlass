@@ -1,0 +1,52 @@
+# OSX
+.DS_Store
+*.pem
+
+# Node
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# Xcode
+ios/build/
+ios/Pods/
+ios/*.xcworkspace/xcuserdata/
+ios/*.xcodeproj/xcuserdata/
+ios/DerivedData/
+
+# Android
+android/app/build/
+android/build/
+android/.gradle/
+
+# React Native
+*.jsbundle
+*.jsbundle.map
+
+# Metro
+.metro-health-check*
+
+# Ruby
+.bundle/
+vendor/bundle/
+
+# Built IPA files (these are build outputs, download from CI artifacts)
+# Uncomment below to exclude existing IPAs from the repo:
+# *.ipa
+
+# Temporary files
+*.log
+*.tmp
+/tmp/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# CocoaPods lock (can be committed or not – your choice)
+# ios/Podfile.lock
+
+# Watchman
+.watchmanconfig
