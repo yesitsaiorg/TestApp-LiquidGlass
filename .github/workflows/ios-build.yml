@@ -128,10 +128,7 @@ jobs:
             echo "platform :ios, '26.0'" | cat - Podfile > /tmp/Podfile.tmp
             mv /tmp/Podfile.tmp Podfile
           fi
-          # Add use_modular_headers! if not present (fixes RNScreens Swift module issue)
-          if ! grep -q "use_modular_headers!" Podfile; then
-            perl -i -pe '$_ .= "use_modular_headers!\n" if /^platform :ios/' Podfile
-          fi
+          # No modular_headers hack needed — react-native-screens pinned to 4.10.0 in package.json
           echo "=== Podfile ==="
           cat Podfile
           echo "✅ Deployment target set to iOS 26.0"
@@ -145,7 +142,7 @@ jobs:
           ls -la *.xcworkspace || echo "⚠️ No .xcworkspace found!"
 
       # ── 11. Patch fmt consteval issue (RN build fix) ────────────
-      - name: Patch fmt consteval → constexpr
+      - name: Patch fmt consteval
         run: |
           cd ios
           FMT_FILES=$(find Pods -name "base.h" -path "*fmt*" 2>/dev/null || true)
@@ -153,12 +150,11 @@ jobs:
             echo "$FMT_FILES" | while read -r f; do
               if grep -q "consteval" "$f" 2>/dev/null; then
                 sed -i '' 's/consteval/constexpr/g' "$f"
-                echo "  Patched: $f"
+                echo "  ✅ Patched fmt: $f"
               fi
             done
-            echo "✅ fmt patches applied"
           else
-            echo "ℹ️  No fmt patch needed"
+            echo "  ℹ️  No fmt patch needed"
           fi
 
       # ── 12. Bundle React Native JS ─────────────────────────────
