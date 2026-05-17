@@ -33,9 +33,6 @@ class LiquidGlassNativeView: RCTView {
     }
     
     private func rebuildEffect() {
-        // Store existing subviews that are NOT the effectView
-        let childViews = subviews.filter { $0 !== effectView }
-        
         effectView?.removeFromSuperview()
         
         let glassEffect = UIGlassEffect()
@@ -45,41 +42,37 @@ class LiquidGlassNativeView: RCTView {
         newEffectView.frame = self.bounds
         newEffectView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         newEffectView.clipsToBounds = true
-        newEffectView.contentView.clipsToBounds = true
+        newEffectView.isUserInteractionEnabled = false
         
         if let tint = glassTintColor {
             newEffectView.backgroundColor = tint.withAlphaComponent(0.15)
         }
         
-        // Insert effect view at the back
+        // Insert effect view at the very back — behind all React Native children
         self.insertSubview(newEffectView, at: 0)
         self.effectView = newEffectView
-        
-        // Move existing child views into the contentView
-        for child in childViews {
-            child.removeFromSuperview()
-            newEffectView.contentView.addSubview(child)
-        }
     }
     
+    // KEY FIX: Do NOT reparent children into contentView.
+    // Let React Native manage children as direct subviews of self.
+    // This preserves Yoga layout calculations and overflow: 'hidden' clipping.
+    // The effectView sits at index 0 as a background; children render on top.
     override func insertReactSubview(_ subview: UIView!, at atIndex: Int) {
-        // Add React Native children to the effectView's contentView, not directly to self
+        super.insertReactSubview(subview, at: atIndex)
+        // Ensure the glass effect stays behind all children
         if let effectView = effectView {
-            effectView.contentView.insertSubview(subview, at: atIndex)
-        } else {
-            super.insertReactSubview(subview, at: atIndex)
+            sendSubviewToBack(effectView)
         }
     }
     
     override func removeReactSubview(_ subview: UIView!) {
-        subview.removeFromSuperview()
+        super.removeReactSubview(subview)
     }
     
     override func layoutSubviews() {
         super.layoutSubviews()
         effectView?.frame = bounds
         effectView?.layer.cornerRadius = layer.cornerRadius
-        effectView?.contentView.layer.cornerRadius = layer.cornerRadius
     }
 }
 
