@@ -67,7 +67,7 @@ jobs:
 
       # ── 4. Install JS dependencies ──────────────────────────────
       - name: Install npm dependencies
-        run: npm install
+        run: npm install --legacy-peer-deps
 
       # ── 5. Generate ios/ directory if not present ───────────────
       # Bare RN 0.80 projects should have ios/ committed, but if
