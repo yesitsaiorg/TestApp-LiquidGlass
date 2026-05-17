@@ -130,8 +130,7 @@ jobs:
           fi
           # Add use_modular_headers! if not present (fixes RNScreens Swift module issue)
           if ! grep -q "use_modular_headers!" Podfile; then
-            sed -i '' '/^platform :ios/a\
-use_modular_headers!' Podfile
+            perl -i -pe '$_ .= "use_modular_headers!\n" if /^platform :ios/' Podfile
           fi
           echo "=== Podfile ==="
           cat Podfile
