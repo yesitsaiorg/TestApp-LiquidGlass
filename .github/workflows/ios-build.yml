@@ -114,28 +114,36 @@ jobs:
           ruby ci_add_native_modules.rb
           echo "✅ Xcode project updated with native modules"
 
-      # ── 9. Update iOS deployment target ─────────────────────────
+      # ── 9. Update iOS deployment target & Podfile ───────────────
       - name: Set iOS deployment target to 26.0
         run: |
           cd ios
           # Update project.pbxproj
           sed -i '' 's/IPHONEOS_DEPLOYMENT_TARGET = [0-9.]*;/IPHONEOS_DEPLOYMENT_TARGET = 26.0;/g' \
             TestApp.xcodeproj/project.pbxproj
-          # Update Podfile
+          # Update Podfile: set platform and add use_modular_headers!
           if grep -q "platform :ios" Podfile; then
             sed -i '' "s/platform :ios, '[0-9.]*'/platform :ios, '26.0'/g" Podfile
           else
             echo "platform :ios, '26.0'" | cat - Podfile > /tmp/Podfile.tmp
             mv /tmp/Podfile.tmp Podfile
           fi
+          # Add use_modular_headers! if not present (fixes RNScreens Swift module issue)
+          if ! grep -q "use_modular_headers!" Podfile; then
+            sed -i '' '/^platform :ios/a\
+use_modular_headers!' Podfile
+          fi
+          echo "=== Podfile ==="
+          cat Podfile
           echo "✅ Deployment target set to iOS 26.0"
 
       # ── 10. CocoaPods install ───────────────────────────────────
       - name: Pod install
         run: |
           cd ios
-          LANG=en_US.UTF-8 pod install --verbose 2>&1 | tail -20
+          LANG=en_US.UTF-8 pod install
           echo "✅ CocoaPods installed"
+          ls -la *.xcworkspace || echo "⚠️ No .xcworkspace found!"
 
       # ── 11. Patch fmt consteval issue (RN build fix) ────────────
       - name: Patch fmt consteval → constexpr
